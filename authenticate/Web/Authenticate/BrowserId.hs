@@ -25,6 +25,8 @@ checkAssertion :: (MonadResource m, MonadBaseControl IO m)
                -> Manager
                -> m (Maybe Text)
 checkAssertion audience assertion manager = do
+    liftIO $ putStrLn "In checkAssertion"
+    liftIO $ print (audience, assertion)
     req' <- liftIO $ parseUrl "https://verifier.login.persona.org/verify"
     let req = urlEncodedBody
                 [ ("audience", encodeUtf8 audience)
@@ -32,6 +34,7 @@ checkAssertion audience assertion manager = do
                 ] req' { method = "POST" }
     res <- httpLbs req manager
     let lbs = responseBody res
+    liftIO $ putStrLn $ "Response body: " ++ show lbs
     return $ maybeResult (parse json lbs) >>= getEmail
   where
     getEmail (Object o) =
