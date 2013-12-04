@@ -20,13 +20,11 @@ module Web.Authenticate.OAuth
       -- * Utility Methods
       paramEncode, addScope, addMaybeProxy
     ) where
-import           Blaze.ByteString.Builder     (toByteString)
-import           Blaze.ByteString.Builder     (Builder)
+import           Blaze.ByteString.Builder     (toByteString, Builder)
 import           Codec.Crypto.RSA             (ha_SHA1, rsassa_pkcs1_v1_5_sign)
 import           Control.Exception
 import           Control.Monad
-import           Control.Monad.IO.Class       (MonadIO)
-import           Control.Monad.IO.Class       (liftIO)
+import           Control.Monad.IO.Class       (MonadIO, liftIO)
 import           Control.Monad.Trans.Control
 import           Control.Monad.Trans.Resource
 import           Crypto.Types.PubKey.RSA      (PrivateKey (..), PublicKey (..))
@@ -39,6 +37,7 @@ import           Data.Conduit.Blaze           (builderToByteString)
 import qualified Data.Conduit.List            as CL
 import           Data.Default
 import           Data.Digest.Pure.SHA
+import qualified Data.IORef                   as I
 import           Data.List                    (sortBy)
 import           Data.Maybe
 import           Data.Time
@@ -161,7 +160,11 @@ getTemporaryCredentialWithScope :: (MonadResource m, MonadBaseControl IO m)
                                 -> m Credential -- ^ Temporay Credential (Request Token & Secret).
 getTemporaryCredentialWithScope bs = getTemporaryCredential' (addScope bs)
 
+#if MIN_VERSION_http_conduit(2, 0, 0)
+addScope :: BS.ByteString -> Request -> Request
+#else
 addScope :: (MonadIO m) => BS.ByteString -> Request m -> Request m
+#endif
 addScope scope req | BS.null scope = req
                    | otherwise     = urlEncodedBody [("scope", scope)] req
 
@@ -174,7 +177,11 @@ getTemporaryCredentialProxy :: (MonadResource m, MonadBaseControl IO m)
 getTemporaryCredentialProxy p oa m = getTemporaryCredential' (addMaybeProxy p) oa m
 
 getTemporaryCredential' :: (MonadResource m, MonadBaseControl IO m)
+#if MIN_VERSION_http_conduit(2, 0, 0)
+                        => (Request -> Request)       -- ^ Request Hook
+#else
                         => (Request m -> Request m)   -- ^ Request Hook
+#endif
                         -> OAuth                      -- ^ OAuth Application
                         -> Manager
                         -> m Credential    -- ^ Temporary Credential (Request Token & Secret).
@@ -230,7 +237,11 @@ getAccessTokenProxy, getTokenCredentialProxy
 getAccessTokenProxy p = getAccessToken' $ addMaybeProxy p
 
 getAccessToken' :: (MonadResource m, MonadBaseControl IO m)
+#if MIN_VERSION_http_conduit(2, 0, 0)
+                => (Request -> Request)       -- ^ Request Hook
+#else
                 => (Request m -> Request m)   -- ^ Request Hook
+#endif
                 -> OAuth                      -- ^ OAuth Application
                 -> Credential                 -- ^ Temporary Credential (with oauth_verifier if >= 1.0a)
                 -> Manager
@@ -277,8 +288,13 @@ injectVerifier = insert "oauth_verifier"
 signOAuth :: (MonadUnsafeIO m)
           => OAuth              -- ^ OAuth Application
           -> Credential         -- ^ Credential
+#if MIN_VERSION_http_conduit(2, 0, 0)
+          -> Request            -- ^ Original Request
+          -> m Request          -- ^ Signed OAuth Request
+#else
           -> Request m          -- ^ Original Request
           -> m (Request m)    -- ^ Signed OAuth Request
+#endif
 signOAuth oa crd req = do
   crd' <- addTimeStamp =<< addNonce crd
   let tok = injectOAuthToCred oa crd'
@@ -316,7 +332,11 @@ injectOAuthToCred oa cred =
             , ("oauth_version", "1.0")
             ] cred
 
+#if MIN_VERSION_http_conduit(2, 0, 0)
+genSign :: MonadUnsafeIO m => OAuth -> Credential -> Request -> m BS.ByteString
+#else
 genSign :: MonadUnsafeIO m => OAuth -> Credential -> Request m -> m BS.ByteString
+#endif
 genSign oa tok req =
   case oauthSignatureMethod oa of
     HMACSHA1 -> do
@@ -328,7 +348,11 @@ genSign oa tok req =
     RSASHA1 pr ->
       liftM (encode . toStrict . rsassa_pkcs1_v1_5_sign ha_SHA1 pr) (getBaseString tok req)
 
+#if MIN_VERSION_http_conduit(2, 0, 0)
+addAuthHeader :: BS.ByteString -> Credential -> Request -> Request
+#else
 addAuthHeader :: BS.ByteString -> Credential -> Request a -> Request a
+#endif
 addAuthHeader prefix (Credential cred) req =
   req { requestHeaders = insertMap "Authorization" (renderAuthHeader prefix cred) $ requestHeaders req }
 
@@ -344,7 +368,11 @@ paramEncode = BS.concatMap escape
                                oct = '%' : replicate (2 - length num) '0' ++ num
                            in BS.pack oct
 
+#if MIN_VERSION_http_conduit(2, 0, 0)
+getBaseString :: MonadUnsafeIO m => Credential -> Request -> m BSL.ByteString
+#else
 getBaseString :: MonadUnsafeIO m => Credential -> Request m -> m BSL.ByteString
+#endif
 getBaseString tok req = do
   let bsMtd  = BS.map toUpper $ method req
       isHttps = secure req
@@ -364,6 +392,34 @@ getBaseString tok req = do
   -- So this is OK.
   return $ BSL.intercalate "&" $ map (fromStrict.paramEncode) [bsMtd, bsURI, bsParams]
 
+#if MIN_VERSION_http_conduit(2, 0, 0)
+toLBS :: MonadUnsafeIO m => RequestBody -> m BS.ByteString
+toLBS (RequestBodyLBS l) = return $ toStrict l
+toLBS (RequestBodyBS s) = return s
+toLBS (RequestBodyBuilder _ b) = return $ toByteString b
+toLBS (RequestBodyStream _ givesPopper) = toLBS' givesPopper
+toLBS (RequestBodyStreamChunked givesPopper) = toLBS' givesPopper
+
+type Popper = IO BS.ByteString
+type NeedsPopper a = Popper -> IO a
+type GivesPopper a = NeedsPopper a -> IO a
+
+toLBS' :: MonadUnsafeIO m => GivesPopper () -> m BS.ByteString
+-- FIXME probably shouldn't be using MonadUnsafeIO
+toLBS' gp = unsafeLiftIO $ do
+    ref <- I.newIORef BS.empty
+    gp (go ref)
+    I.readIORef ref
+  where
+    go ref popper =
+        loop id
+      where
+        loop front = do
+            bs <- popper
+            if BS.null bs
+                then I.writeIORef ref $ BS.concat $ front []
+                else loop (front . (bs:))
+#else
 toLBS :: MonadUnsafeIO m => RequestBody m -> m BS.ByteString
 toLBS (RequestBodyLBS l) = return $ toStrict l
 toLBS (RequestBodyBS s) = return s
@@ -373,6 +429,7 @@ toLBS (RequestBodySourceChunked src) = toLBS' src
 
 toLBS' :: MonadUnsafeIO m => Source m Builder -> m BS.ByteString
 toLBS' src = liftM BS.concat $ src $= builderToByteString $$ CL.consume
+#endif
 
 isBodyFormEncoded :: [Header] -> Bool
 isBodyFormEncoded = maybe False (=="application/x-www-form-urlencoded") . lookup "Content-Type"
@@ -384,5 +441,9 @@ compareTuple (a,b) (c,d) =
     EQ -> compare b d
     GT -> GT
 
+#if MIN_VERSION_http_conduit(2, 0, 0)
+addMaybeProxy :: Maybe Proxy -> Request -> Request
+#else
 addMaybeProxy :: Maybe Proxy -> Request m -> Request m
+#endif
 addMaybeProxy p req = req { proxy = p }
