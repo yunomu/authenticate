@@ -1,6 +1,6 @@
 
 name:            authenticate-oauth
-version:         1.4.0.7
+version:         1.4.0.8
 license:         BSD3
 license-file:    LICENSE
 author:          Hiromi Ishii
