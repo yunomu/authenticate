@@ -21,7 +21,7 @@ module Web.Authenticate.OAuth
       paramEncode, addScope, addMaybeProxy
     ) where
 import           Blaze.ByteString.Builder     (toByteString, Builder)
-import           Codec.Crypto.RSA             (ha_SHA1, rsassa_pkcs1_v1_5_sign)
+import qualified Codec.Crypto.RSA             as RSA
 import           Control.Exception
 import           Control.Monad
 import           Control.Monad.IO.Class       (MonadIO, liftIO)
@@ -346,7 +346,13 @@ genSign oa tok req =
     PLAINTEXT ->
       return $ BS.intercalate "&" $ map paramEncode [oauthConsumerSecret oa, tokenSecret tok]
     RSASHA1 pr ->
-      liftM (encode . toStrict . rsassa_pkcs1_v1_5_sign ha_SHA1 pr) (getBaseString tok req)
+      liftM (encode . toStrict . RSA.rsassa_pkcs1_v1_5_sign
+#if MIN_VERSION_RSA(2, 0, 0)
+                                     RSA.hashSHA1
+#else
+                                     RSA.ha_SHA1
+#endif
+                                     pr) (getBaseString tok req)
 
 #if MIN_VERSION_http_conduit(2, 0, 0)
 addAuthHeader :: BS.ByteString -> Credential -> Request -> Request
