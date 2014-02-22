@@ -1,5 +1,5 @@
-{-# LANGUAGE DeriveDataTypeable, OverloadedStrings, StandaloneDeriving, FlexibleContexts #-}
-{-# LANGUAGE CPP #-}
+{-# LANGUAGE CPP, DeriveDataTypeable, FlexibleContexts, MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings, StandaloneDeriving                            #-}
 {-# OPTIONS_GHC -Wall -fno-warn-orphans #-}
 module Web.Authenticate.OAuth
     ( -- * Data types
@@ -15,12 +15,41 @@ module Web.Authenticate.OAuth
       authorizeUrl, authorizeUrl', getAccessToken, getTemporaryCredential,
       getTokenCredential, getTemporaryCredentialWithScope,
       getAccessTokenProxy, getTemporaryCredentialProxy,
-      getTokenCredentialProxy, 
+      getTokenCredentialProxy,
       getAccessToken', getTemporaryCredential',
       -- * Utility Methods
       paramEncode, addScope, addMaybeProxy
     ) where
-import Network.HTTP.Conduit
+import           Blaze.ByteString.Builder     (toByteString, Builder)
+import qualified Codec.Crypto.RSA             as RSA
+import           Control.Exception
+import           Control.Monad
+import           Control.Monad.IO.Class       (MonadIO, liftIO)
+import           Control.Monad.Trans.Control
+import           Control.Monad.Trans.Resource
+import           Crypto.Types.PubKey.RSA      (PrivateKey (..), PublicKey (..))
+import           Data.ByteString.Base64
+import qualified Data.ByteString.Char8        as BS
+import qualified Data.ByteString.Lazy.Char8   as BSL
+import           Data.Char
+import           Data.Conduit                 (Source, ($$), ($=))
+import           Data.Conduit.Blaze           (builderToByteString)
+import qualified Data.Conduit.List            as CL
+import           Data.Default
+import           Data.Digest.Pure.SHA
+import qualified Data.IORef                   as I
+import           Data.List                    (sortBy)
+import           Data.Maybe
+import           Data.Time
+import           Network.HTTP.Conduit
+import           Network.HTTP.Types           (SimpleQuery, parseSimpleQuery)
+import           Network.HTTP.Types           (Header)
+import           Network.HTTP.Types           (renderSimpleQuery, status200)
+import           Numeric
+import           System.Random
+#if MIN_VERSION_base(4,7,0)
+import Data.Data hiding (Proxy (..))
+#else
 import Data.Data
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as BSL
@@ -56,9 +85,9 @@ import Data.Default
 import qualified Data.IORef as I
 
 -- | Data type for OAuth client (consumer).
--- 
--- The constructor for this data type is not exposed. 
--- Instead, you should use the 'def' method or 'newOAuth' function to retrieve a default instance, 
+--
+-- The constructor for this data type is not exposed.
+-- Instead, you should use the 'def' method or 'newOAuth' function to retrieve a default instance,
 -- and then use the records below to make modifications.
 -- This approach allows us to add configuration options without breaking backwards compatibility.
 data OAuth = OAuth { oauthServerName      :: String -- ^ Service name (default: @\"\"@)
@@ -73,7 +102,7 @@ data OAuth = OAuth { oauthServerName      :: String -- ^ Service name (default: 
                    , oauthAuthorizeUri    :: String
                    -- ^ Uri to authorize (default: @\"\"@).
                    --   You MUST specify if you use 'authorizeUrl' or 'authorizeZUrl'';
-                   --   otherwise you can just leave this empty. 
+                   --   otherwise you can just leave this empty.
                    , oauthSignatureMethod :: SignMethod
                    -- ^ Signature Method (default: 'HMACSHA1')
                    , oauthConsumerKey     :: BS.ByteString
@@ -190,7 +219,7 @@ getTemporaryCredential' :: (MonadResource m, MonadBaseControl IO m)
 getTemporaryCredential' hook oa manager = do
   let req = fromJust $ parseUrl $ oauthRequestUri oa
       crd = maybe id (insert "oauth_callback") (oauthCallback oa) $ emptyCredential
-  req' <- signOAuth oa crd $ hook (req { method = "POST" }) 
+  req' <- signOAuth oa crd $ hook (req { method = "POST" })
   rsp <- httpLbs req' manager
   if responseStatus rsp == status200
     then do
@@ -213,7 +242,7 @@ authorizeUrl' :: (OAuth -> Credential -> SimpleQuery)
               -> String          -- ^ URL to authorize
 authorizeUrl' f oa cr = oauthAuthorizeUri oa ++ BS.unpack (renderSimpleQuery True queries)
   where fixed   = ("oauth_token", token cr):f oa cr
-        queries = 
+        queries =
           case oauthCallback oa of
             Nothing       -> fixed
             Just callback -> ("oauth_callback", callback):fixed
