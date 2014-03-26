@@ -37,11 +37,14 @@ import Data.Text.Lazy (toStrict)
 import qualified Data.Text as T
 import Data.Text.Lazy.Encoding (decodeUtf8With)
 import Data.Text.Encoding.Error (lenientDecode)
-import Text.HTML.TagSoup (parseTags, Tag (TagOpen))
 import Control.Applicative ((<$>), (<*>))
 import Network.HTTP.Types (status200)
 import Control.Exception (throwIO)
 import Data.Conduit (MonadBaseControl, MonadResource)
+import Data.Conduit ((=$), ($$), yield)
+import Text.HTML.TagStream.Text (tokenStream, Token)
+import Text.HTML.TagStream.Types (Token' (TagOpen))
+import qualified Data.Conduit.List as CL
 
 data Discovery = Discovery1 Text (Maybe Text)
                | Discovery2 Provider Identifier IdentType
@@ -134,12 +137,16 @@ discoverHTML ident'@(Identifier ident) manager = do
 -- | Parse out an OpenID endpoint and an actual identifier from an HTML
 -- document.
 parseHTML :: Identifier -> Text -> Maybe Discovery
-parseHTML ident = resolve
-                . filter isOpenId
-                . mapMaybe linkTag
-                . parseTags
+parseHTML ident text0 = do
+    ls <- yield text0
+       $$ tokenStream
+       =$ CL.mapMaybe linkTag
+       =$ CL.filter isOpenId
+       =$ CL.consume
+    resolve ls
   where
     isOpenId (rel, _x) = "openid" `T.isPrefixOf` rel
+
     resolve1 ls = do
       server <- lookup "openid.server" ls
       let delegate = lookup "openid.delegate" ls
@@ -150,10 +157,11 @@ parseHTML ident = resolve
       -- Based on OpenID 2.0 spec, section 7.3.3, HTML discovery can only
       -- result in a claimed identifier.
       return $ Discovery2 (Provider prov) lid ClaimedIdent
+
     resolve ls = resolve2 ls `mplus` resolve1 ls
 
 
 -- | Filter out link tags from a list of html tags.
-linkTag :: Tag Text -> Maybe (Text, Text)
-linkTag (TagOpen "link" as) = (,) <$> lookup "rel" as <*> lookup "href" as
+linkTag :: Token -> Maybe (Text, Text)
+linkTag (TagOpen "link" as _) = (,) <$> lookup "rel" as <*> lookup "href" as
 linkTag _x = Nothing

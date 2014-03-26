@@ -19,7 +19,6 @@ library
     build-depends:   base                          >= 4        && < 5
                    , aeson                         >= 0.5
                    , http-conduit                  >= 1.5
-                   , tagsoup                       >= 0.12
                    , transformers                  >= 0.1
                    , bytestring                    >= 0.9
                    , network
@@ -32,6 +31,7 @@ library
                    , containers
                    , unordered-containers
                    , conduit                       >= 0.5
+                   , tagstream-conduit             >= 0.5.5
     exposed-modules: Web.Authenticate.Rpxnow,
                      Web.Authenticate.OpenId,
                      Web.Authenticate.BrowserId,
