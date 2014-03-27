@@ -38,7 +38,8 @@ import qualified Data.Aeson.Types
 import qualified Data.HashMap.Lazy as Map
 import Control.Applicative ((<$>), (<*>))
 import Control.Exception (throwIO)
-import Data.Conduit (MonadBaseControl, MonadResource)
+import Control.Monad.Trans.Control (MonadBaseControl)
+import Control.Monad.Trans.Resource (MonadResource)
 
 -- | Information received from Rpxnow after a valid login.
 data Identifier = Identifier
