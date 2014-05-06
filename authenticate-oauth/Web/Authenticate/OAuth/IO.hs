@@ -24,7 +24,6 @@ import Web.Authenticate.OAuth hiding
      getAccessTokenProxy, getTemporaryCredentialProxy,
      getTokenCredentialProxy,
      getAccessToken', getTemporaryCredential')
-import Data.Conduit
 import Control.Monad.IO.Class
 import qualified Data.ByteString.Char8 as BS
 

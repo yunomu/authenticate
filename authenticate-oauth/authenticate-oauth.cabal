@@ -15,21 +15,22 @@ homepage:        http://github.com/yesodweb/authenticate
 library
     build-depends:   base                          >= 4        && < 5
                    , http-conduit                  >= 1.4
-                   , transformers                  >= 0.1      && < 0.4
+                   , transformers                  >= 0.1
                    , bytestring                    >= 0.9
-                   , crypto-pubkey-types           >= 0.1      && < 0.5
-                   , RSA                           >= 1.2      && < 2.1
+                   , crypto-pubkey-types           >= 0.1
+                   , RSA                           >= 1.2
                    , time
                    , data-default
-                   , base64-bytestring             >= 0.1      && < 1.1
-                   , SHA                           >= 1.4      && < 1.7
+                   , base64-bytestring             >= 0.1
+                   , SHA                           >= 1.4
                    , random
                    , http-types                    >= 0.6
                    , blaze-builder
-                   , conduit                       >= 0.4
-                   , resourcet                     >= 0.3      && < 0.5
+                   , conduit                       >= 1.1
+                   , conduit-extra                 >= 1.1
+                   , resourcet                     >= 1.1
                    , blaze-builder-conduit         >= 0.4
-                   , monad-control                 >= 0.3      && < 0.4
+                   , monad-control                 >= 0.3
     exposed-modules: Web.Authenticate.OAuth, Web.Authenticate.OAuth.IO
     ghc-options:     -Wall
 
